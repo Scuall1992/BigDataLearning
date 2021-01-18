@@ -23,7 +23,7 @@
 
 ### 3. Скопировал jar файлы avro parquet tools
 
-`docker container cp ~/Downloads/jar_files/avro-tools-1.7.4.jar <container ID>:/root/`
+`docker container cp ~/Downloads/jar_files/avro-tools-1.7.4.jar <container ID>:/root/` \
 `docker container cp parquet-tools-1.8.0.jar <container ID>:/root`
 
 ### 4. Подключился к контейнеру
