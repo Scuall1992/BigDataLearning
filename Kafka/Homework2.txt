@@ -1,0 +1,107 @@
+Load data to hdfs
+
+    hdfs hdf -put weather /
+
+Weather data schema
+
+
+    {
+        "type":"struct",
+        "fields":
+            [
+                {
+                    "name":"lng",
+                    "type":"double",
+                    "nullable":true,
+                    "metadata":{}
+                },
+                {
+                    "name":"lat",
+                    "type":"double",
+                    "nullable":true,
+                    "metadata":{}
+                },
+                {
+                    "name":"avg_tmpr_f",
+                    "type":"double",
+                    "nullable":true,
+                    "metadata":{}
+                },
+                {
+                    "name":"avg_tmpr_c",
+                    "type":"double",
+                    "nullable":true,
+                    "metadata":{}
+                },
+                {
+                    "name":"wthr_date",
+                    "type":"string",
+                    "nullable":true,
+                    "metadata":{}
+                }
+            ]
+    }
+
+
+Create Hive table for weather.
+
+    CREATE TABLE weather ( lng Float, lat Float, avg_tmpr_f Float, avg_tmpr_c Float, wthr_date String) PARTITIONED BY (year STRING, month STRING, day STRING) CLUSTERED BY (avg_tmpr_c) INTO 3 BUCKETS
+    
+Import weather data (.parquet) from HDFS into Hive table on WSL2.
+
+    create external table weather_ext (lng DOUBLE, lat double, avg_tmpr_f double, avg_tmpr_c double, wthr_date string) partitioned by (year string, month string, day string) stored as parquet location 'hdfs://namenode:8020/weather';
+
+    msck repair table weather_ext;
+
+
+Create topic in kafka
+
+    kafka-topics.sh --create --topic weather-topic --bootstrap-server localhost:9092
+
+Load data into Kafka using Hive-Kafka integration (Hive v3.x is required).
+
+    CREATE EXTERNAL TABLE
+    kafka_weather_table (
+        `lng` DOUBLE,
+        `lat` DOUBLE,
+        `avg_tmpr_f` DOUBLE,
+        `avg_tmpr_c` DOUBLE,
+        `wthr_date` STRING,
+        `year` STRING,
+        `month` STRING,
+        `day` STRING
+    )
+    STORED BY
+    'org.apache.hadoop.hive.kafka.KafkaStorageHandler'
+    TBLPROPERTIES (
+    "kafka.topic" = "weather-topic",
+    "kafka.bootstrap.servers" = "localhost:9092");
+
+
+Enrich weather data with geo-hash for 4-characters precision (add a column with 4 digits geo hash precision based on latitude and longitude).
+
+    create table transform_weather
+    as select transform(lng, lat, avg_tmpr_f, avg_tmpr_c, wthr_date)
+    using 'python3 transform_weather.py' as (lng, lat, avg_tmpr_f, avg_tmpr_c, wthr_date, geohash)
+    from weather;
+
+transform_weather.py
+
+    import sys
+    import pygeohash as gh  # api for geohashing
+
+    for line in sys.stdin:
+        data = list(map(str,line.rstrip("\n").split('\t')))
+        data.append(gh.encode(float(lng), float(lat), precision=4))
+        print("\t".join(data))
+
+
+Use hotels data, each hotel extend with date dimennsion, same period as in weather data. Try to join enritched hotels with weather, by following keys (date, 4-characters geo-hash). In case of will be no mapping - weather data will be empty for this hotel, in case of multiple results for a hotel in a particular day - group them in a single entity, calculating average weather parameters. Final dataset should contain hotels data enriched with weather per day and output should go to separate Kafka topic.
+
+
+    CREATE TABLE hotels(Id bigint, Name string, Country string, City string, Address string, Latitude double, Longitude double) row format delimited fields terminated by ',';
+
+    LOAD DATA LOCAL INPATH 'hotels.csv' OVERWRITE INTO TABLE hotels;
+
+    #Дальше пока не разобрался
+
